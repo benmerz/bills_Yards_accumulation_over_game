@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Buffalo Bills vs Opponent: Accumulative Yards</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f7f7f7; margin: 0; padding: 0; }
+        .container { max-width: 1100px; margin: 40px auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 8px #0001; padding: 32px; }
+        h1 { text-align: center; }
+        .controls { text-align: center; margin-bottom: 24px; }
+        .graphs { display: flex; justify-content: space-between; gap: 32px; }
+        .graph-container { flex: 1; background: #f0f0f0; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; align-items: center; }
+        canvas { background: #fff; border-radius: 8px; box-shadow: 0 1px 4px #0002; }
+        .logos { display: flex; justify-content: space-between; margin-top: 16px; }
+        .logo-img { height: 48px; }
+        .label { text-align: center; font-weight: bold; margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Buffalo Bills vs Opponent: Accumulative Yards</h1>
+    <div class="controls">
+        <label for="week-select">Select Week: </label>
+        <select id="week-select"></select>
+    </div>
+    <div class="graphs">
+        <div class="graph-container">
+            <div class="label" id="bills-label">Buffalo Bills</div>
+            <canvas id="bills-canvas" width="400" height="300"></canvas>
+        </div>
+        <div class="graph-container">
+            <div class="label" id="opp-label">Opponent</div>
+            <canvas id="opp-canvas" width="400" height="300"></canvas>
+        </div>
+    </div>
+    <div class="logos">
+        <img id="bills-logo" class="logo-img" src="https://upload.wikimedia.org/wikipedia/en/thumb/7/77/Buffalo_Bills_logo.svg/189px-Buffalo_Bills_logo.svg.png" alt="Buffalo Bills Logo">
+        <img id="opp-logo" class="logo-img" src="" alt="Opponent Logo">
+    </div>
+</div>
+<script>
+// --- CONFIG ---
+const BILLS_ABBR = 'BUF';
+const BILLS_COLOR = '#00338D';
+const BILLS_LOGO = 'https://upload.wikimedia.org/wikipedia/en/thumb/7/77/Buffalo_Bills_logo.svg/189px-Buffalo_Bills_logo.svg.png';
+
+// --- TEAM INFO (add more as needed) ---
+const TEAM_INFO = {
+    'BUF': { color: '#00338D', logo: BILLS_LOGO, name: 'Buffalo Bills' },
+    'ARI': { color: '#97233F', logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/7/72/Arizona_Cardinals_logo.svg/179px-Arizona_Cardinals_logo.svg.png', name: 'Arizona Cardinals' },
+    'MIA': { color: '#008E97', logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/3/37/Miami_Dolphins_logo.svg/100px-Miami_Dolphins_logo.svg.png', name: 'Miami Dolphins' },
+    'NE': { color: '#002244', logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/b/b9/New_England_Patriots_logo.svg/100px-New_England_Patriots_logo.svg.png', name: 'New England Patriots' },
+    'NYJ': { color: '#003F2D', logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/6/6b/New_York_Jets_logo.svg/100px-New_York_Jets_logo.svg.png', name: 'New York Jets' },
+    // ...add more as needed
+};
+
+// --- DATA LOADING ---
+let stats = [];
+fetch('final_stats_for_app.csv')
+    .then(r => r.text())
+    .then(text => {
+        stats = parseCSV(text);
+        setupWeekDropdown();
+        updateGraphs();
+    });
+
+function parseCSV(text) {
+    const lines = text.trim().split('\n');
+    const headers = lines[0].split(',');
+    return lines.slice(1).map(line => {
+        const values = line.split(',');
+        const obj = {};
+        headers.forEach((h, i) => obj[h.trim()] = values[i]);
+        return obj;
+    });
+}
+
+function setupWeekDropdown() {
+    const weekSelect = document.getElementById('week-select');
+    const weeks = [...new Set(stats.map(row => row.week))].sort((a, b) => +a - +b);
+    weekSelect.innerHTML = weeks.map(w => `<option value="${w}">${w}</option>`).join('');
+    weekSelect.addEventListener('change', updateGraphs);
+}
+
+function updateGraphs() {
+    const week = document.getElementById('week-select').value || stats[0].week;
+    const weekStats = stats.filter(row => row.week === week);
+    const billsStats = weekStats.filter(row => row.team_type === 'Bills');
+    const oppStats = weekStats.filter(row => row.team_type === 'Opponent');
+    const oppTeam = oppStats.length ? oppStats[0].posteam : '';
+    // Find max Y (yards) for both graphs
+    const maxYards = Math.max(
+        ...billsStats.map(d => +d.cumulative_yards),
+        ...oppStats.map(d => +d.cumulative_yards),
+        1 // avoid 0
+    );
+    // Update labels and logos
+    document.getElementById('bills-label').textContent = TEAM_INFO[BILLS_ABBR]?.name || 'Buffalo Bills';
+    document.getElementById('bills-logo').src = TEAM_INFO[BILLS_ABBR]?.logo || '';
+    document.getElementById('bills-logo').onerror = function() {
+        this.onerror = null;
+        this.src = 'https://upload.wikimedia.org/wikipedia/commons/1/1b/No-image-available.png';
+    };
+    document.getElementById('opp-label').textContent = TEAM_INFO[oppTeam]?.name || oppTeam || 'Opponent';
+    document.getElementById('opp-logo').src = TEAM_INFO[oppTeam]?.logo || '';
+    document.getElementById('opp-logo').onerror = function() {
+        this.onerror = null;
+        this.src = 'https://upload.wikimedia.org/wikipedia/commons/1/1b/No-image-available.png';
+    };
+    // Draw graphs with x-axis as minutes 1-60
+    drawGraph('bills-canvas', billsStats, TEAM_INFO[BILLS_ABBR]?.color || '#00338D', maxYards);
+    drawGraph('opp-canvas', oppStats, TEAM_INFO[oppTeam]?.color || '#888', maxYards);
+}
+
+function drawGraph(canvasId, data, color, maxYards) {
+    const canvas = document.getElementById(canvasId);
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!data.length) return;
+    // Draw grid lines and Y axis values
+    ctx.strokeStyle = '#ccc';
+    ctx.lineWidth = 1;
+    ctx.font = '12px Arial';
+    ctx.fillStyle = '#333';
+    for (let i = 0; i <= 5; i++) {
+        const y = 270 - (240 * i / 5);
+        ctx.beginPath();
+        ctx.moveTo(40, y);
+        ctx.lineTo(390, y);
+        ctx.stroke();
+        const val = Math.round(maxYards * i / 5);
+        ctx.fillText(val.toString(), 10, y + 4);
+    }
+    // Draw vertical grid lines and X axis values (minutes 1-60)
+    for (let i = 0; i <= 6; i++) {
+        const x = 40 + (350 * i / 6);
+        ctx.beginPath();
+        ctx.moveTo(x, 10);
+        ctx.lineTo(x, 270);
+        ctx.stroke();
+        const min = 1 + Math.round(59 * i / 6);
+        ctx.fillText(min.toString(), x - 8, 290);
+    }
+    // Draw axes
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(40, 10);
+    ctx.lineTo(40, 270);
+    ctx.lineTo(390, 270);
+    ctx.stroke();
+    // Draw line, mapping plays to minutes (1-60)
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    let lastMinute = 1;
+    data.forEach((d, i) => {
+        // Map play to minute (spread evenly across 1-60)
+        const minute = 1 + Math.round(59 * i / ((data.length - 1) || 1));
+        const x = 40 + (350 * (minute - 1) / 59);
+        const y = 270 - (240 * (+d.cumulative_yards) / (maxYards || 1));
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+        lastMinute = minute;
+    });
+    ctx.stroke();
+}
+</script>
+</body>
+</html>
